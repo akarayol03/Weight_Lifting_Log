@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Antrenman Log</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#111827">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px;
+    background: #111827; color: #f3f4f6;
+    font-family: -apple-system, system-ui, sans-serif;
+    max-width: 480px; margin: 0 auto;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 12px; }
+  form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+  input, select, button {
+    padding: 10px; border-radius: 8px; border: 1px solid #374151;
+    background: #1f2937; color: #f3f4f6; font-size: 1rem;
+  }
+  button { background: #2563eb; border: none; cursor: pointer; font-weight: 600; }
+  button:active { background: #1d4ed8; }
+  #feedback { margin: 8px 0; font-size: 0.9rem; min-height: 1.2em; }
+  .up { color: #4ade80; }
+  .down { color: #f87171; }
+  .same { color: #9ca3af; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.85rem; }
+  th, td { padding: 6px 4px; text-align: left; border-bottom: 1px solid #374151; }
+  th { color: #9ca3af; font-weight: 500; }
+  canvas { width: 100%; height: 160px; background: #1f2937; border-radius: 8px; margin-top: 12px; }
+  .backup { display: flex; gap: 8px; margin-top: 16px; }
+  .backup button { flex: 1; background: #374151; }
+  select#exercise-filter { margin-top: 12px; }
+</style>
+</head>
+<body>
+  <h1>🏋️ Antrenman Log</h1>
+
+  <form id="entry-form">
+    <input list="exercise-list" id="exercise" placeholder="Hareket adı (örn: Bench Press)" required>
+    <datalist id="exercise-list"></datalist>
+    <input type="number" id="weight" placeholder="Ağırlık (kg)" step="0.5" required>
+    <input type="number" id="reps" placeholder="Tekrar" required>
+    <input type="number" id="sets" placeholder="Set" required>
+    <button type="submit">Kaydet</button>
+  </form>
+
+  <div id="feedback"></div>
+
+  <select id="exercise-filter">
+    <option value="">Tüm hareketler</option>
+  </select>
+
+  <canvas id="chart" width="440" height="160"></canvas>
+
+  <table>
+    <thead><tr><th>Tarih</th><th>Hareket</th><th>Ağr.</th><th>Tekrar</th><th>Set</th><th>Hacim</th></tr></thead>
+    <tbody id="history-body"></tbody>
+  </table>
+
+  <div class="backup">
+    <button id="export-btn">⬇️ Yedekle</button>
+    <button id="import-btn">⬆️ Yedekten Yükle</button>
+    <input type="file" id="import-input" accept="application/json" style="display:none">
+  </div>
+
+<script>
+const STORAGE_KEY = 'workoutEntries';
+
+function loadEntries() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+  catch { return []; }
+}
+function saveEntries(entries) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+}
+
+let entries = loadEntries();
+
+const form = document.getElementById('entry-form');
+const feedback = document.getElementById('feedback');
+const exerciseInput = document.getElementById('exercise');
+const exerciseList = document.getElementById('exercise-list');
+const exerciseFilter = document.getElementById('exercise-filter');
+const historyBody = document.getElementById('history-body');
+const canvas = document.getElementById('chart');
+const ctx = canvas.getContext('2d');
+
+function uniqueExercises() {
+  return [...new Set(entries.map(e => e.exercise))];
+}
+
+function refreshExerciseUI() {
+  const names = uniqueExercises();
+  exerciseList.innerHTML = names.map(n => `<option value="${n}">`).join('');
+  const current = exerciseFilter.value;
+  exerciseFilter.innerHTML = '<option value="">Tüm hareketler</option>' +
+    names.map(n => `<option value="${n}">${n}</option>`).join('');
+  exerciseFilter.value = names.includes(current) ? current : '';
+}
+
+function renderHistory() {
+  const filter = exerciseFilter.value;
+  const filtered = filter ? entries.filter(e => e.exercise === filter) : entries;
+  const sorted = [...filtered].sort((a, b) => new Date(b.date) - new Date(a.date));
+  historyBody.innerHTML = sorted.slice(0, 30).map(e => `
+    <tr>
+      <td>${new Date(e.date).toLocaleDateString('tr-TR')}</td>
+      <td>${e.exercise}</td>
+      <td>${e.weight}</td>
+      <td>${e.reps}</td>
+      <td>${e.sets}</td>
+      <td>${e.volume}</td>
+    </tr>
+  `).join('');
+}
+
+function renderChart() {
+  const filter = exerciseFilter.value || uniqueExercises()[0];
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!filter) return;
+  const data = entries
+    .filter(e => e.exercise === filter)
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+  if (data.length < 1) return;
+
+  const volumes = data.map(e => e.volume);
+  const max = Math.max(...volumes, 1);
+  const min = Math.min(...volumes, 0);
+  const range = max - min || 1;
+  const padding = 20;
+  const w = canvas.width - padding * 2;
+  const h = canvas.height - padding * 2;
+
+  ctx.strokeStyle = '#3b82f6';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  data.forEach((e, i) => {
+    const x = padding + (i / Math.max(data.length - 1, 1)) * w;
+    const y = padding + h - ((e.volume - min) / range) * h;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  ctx.fillStyle = '#3b82f6';
+  data.forEach((e, i) => {
+    const x = padding + (i / Math.max(data.length - 1, 1)) * w;
+    const y = padding + h - ((e.volume - min) / range) * h;
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  ctx.fillStyle = '#9ca3af';
+  ctx.font = '11px sans-serif';
+  ctx.fillText(filter + ' — hacim (kg)', padding, 14);
+}
+
+function renderAll() {
+  refreshExerciseUI();
+  renderHistory();
+  renderChart();
+}
+
+exerciseFilter.addEventListener('change', () => {
+  renderHistory();
+  renderChart();
+});
+
+form.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const exercise = exerciseInput.value.trim();
+  const weight = parseFloat(document.getElementById('weight').value);
+  const reps = parseInt(document.getElementById('reps').value);
+  const sets = parseInt(document.getElementById('sets').value);
+  const volume = weight * reps * sets;
+
+  const previous = entries
+    .filter(x => x.exercise === exercise)
+    .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+
+  entries.push({
+    id: Date.now(),
+    exercise, weight, reps, sets, volume,
+    date: new Date().toISOString()
+  });
+  saveEntries(entries);
+
+  if (previous) {
+    const diff = volume - previous.volume;
+    const pct = ((diff / previous.volume) * 100).toFixed(1);
+    if (diff > 0) feedback.innerHTML = `<span class="up">▲ Hacim +${diff} kg (%${pct}) — geçen sefere göre artış</span>`;
+    else if (diff < 0) feedback.innerHTML = `<span class="down">▼ Hacim ${diff} kg (%${pct}) — geçen sefere göre azalış</span>`;
+    else feedback.innerHTML = `<span class="same">= Hacim aynı kaldı</span>`;
+  } else {
+    feedback.innerHTML = `<span class="same">İlk kayıt — hacim: ${volume} kg</span>`;
+  }
+
+  form.reset();
+  renderAll();
+});
+
+document.getElementById('export-btn').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(entries, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `antrenman-yedek-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById('import-btn').addEventListener('click', () => {
+  document.getElementById('import-input').click();
+});
+document.getElementById('import-input').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (evt) => {
+    try {
+      const imported = JSON.parse(evt.target.result);
+      const existingIds = new Set(entries.map(x => x.id));
+      const merged = entries.concat(imported.filter(x => !existingIds.has(x.id)));
+      entries = merged;
+      saveEntries(entries);
+      renderAll();
+      feedback.innerHTML = `<span class="same">Yedek yüklendi: ${imported.length} kayıt işlendi</span>`;
+    } catch {
+      feedback.innerHTML = `<span class="down">Yedek dosyası okunamadı</span>`;
+    }
+  };
+  reader.readAsText(file);
+});
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('service-worker.js').catch(() => {});
+  });
+}
+
+renderAll();
+</script>
+</body>
+</html>
