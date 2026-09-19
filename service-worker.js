@@ -1,24 +1,33 @@
-const CACHE_NAME = 'antrenman-log-v1';
-const FILES_TO_CACHE = ['./', './index.html', './manifest.json'];
+const CACHE_NAME = 'antrenman-log-v3';
+const FILES = ['./', './index.html', './manifest.json'];
 
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(FILES_TO_CACHE))
-  );
+self.addEventListener('install', function (event) {
+  event.waitUntil(caches.open(CACHE_NAME).then(function (c) { return c.addAll(FILES); }));
   self.skipWaiting();
 });
 
-self.addEventListener('activate', (event) => {
+self.addEventListener('activate', function (event) {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+    caches.keys().then(function (keys) {
+      return Promise.all(keys.map(function (k) {
+        if (k !== CACHE_NAME) return caches.delete(k);
+      }));
+    })
   );
   self.clients.claim();
 });
 
-self.addEventListener('fetch', (event) => {
+// Önce ağ, olmazsa cache — böylece push ettiğin güncellemeler hemen görünür,
+// internet yokken de uygulama açılır.
+self.addEventListener('fetch', function (event) {
+  if (event.request.method !== 'GET') return;
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request))
+    fetch(event.request)
+      .then(function (res) {
+        const copy = res.clone();
+        caches.open(CACHE_NAME).then(function (c) { c.put(event.request, copy); });
+        return res;
+      })
+      .catch(function () { return caches.match(event.request); })
   );
 });
